@@ -1,9 +1,13 @@
 import json
+import os.path
+
 from setuptools import setup
 
-
-with open('setup.json', 'r') as setup_json:
-    config = json.loads(setup_json.read())
+if os.path.exists("setup.json"):
+    with open('setup.json', 'r') as setup_json:
+        config = json.loads(setup_json.read())
+else:
+    config = {}
 
 base_config = dict(
     author='Lucas Emery and Matthew Allen',

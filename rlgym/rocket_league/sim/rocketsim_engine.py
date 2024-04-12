@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import RocketSim as rsim
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from rlgym.api import TransitionEngine, AgentID
 from rlgym.rocket_league.api import Car, GameConfig, GameState, PhysicsObject
@@ -25,8 +25,16 @@ class RocketSimEngine(TransitionEngine[AgentID, GameState, np.ndarray]):
         self._cars: Dict[AgentID, rsim.Car] = {}
         self._hitboxes: Dict[int, int] = {}
         self._touches: Dict[int, int] = {}
+        self._saves = Dict[int, int] = {}
+        self._shots = Dict[int, int] = {}
         self._arena = rsim.Arena(rsim.GameMode.SOCCAR)
+
+        self._init_callbacks()
+
+    def _init_callbacks(self):
         self._arena.set_ball_touch_callback(self._ball_touch_callback)
+        self._arena.set_shot_event_callback(self._shot_callback)
+        self._arena.set_save_event_callback(self._save_callback)
 
     @property
     def agents(self) -> List[AgentID]:
@@ -89,10 +97,6 @@ class RocketSimEngine(TransitionEngine[AgentID, GameState, np.ndarray]):
         ball_state.pos = rsim.Vec(*desired_state.ball.position)
         ball_state.vel = rsim.Vec(*desired_state.ball.linear_velocity)
         ball_state.ang_vel = rsim.Vec(*desired_state.ball.angular_velocity)
-        try:
-            ball_state.rot_mat = rsim.RotMat(*desired_state.ball.rotation_mtx.transpose().flatten())
-        except ValueError:
-            pass
         self._arena.ball.set_state(ball_state)
 
         #TODO reuse cars? We'd have to check the hitbox
@@ -101,6 +105,8 @@ class RocketSimEngine(TransitionEngine[AgentID, GameState, np.ndarray]):
         self._cars.clear()
         self._hitboxes.clear()
         self._touches.clear()
+        self._saves.clear()
+        self._shots.clear()
 
         for agent_id, desired_car in desired_state.cars.items():
             config = rsim.CarConfig(desired_car.hitbox_type)
@@ -108,7 +114,7 @@ class RocketSimEngine(TransitionEngine[AgentID, GameState, np.ndarray]):
             car: rsim.Car = self._arena.add_car(desired_car.team_num, config)
             self._cars[agent_id] = car
             self._hitboxes[car.id] = desired_car.hitbox_type
-            self._touches[car.id] = 0
+            self._touches[car.id] = self._shots[car.id] = self._saves[car.id] = 0
 
             self._set_car_state(car, desired_car)
 
@@ -130,7 +136,6 @@ class RocketSimEngine(TransitionEngine[AgentID, GameState, np.ndarray]):
         gs.ball.position = ball_state.pos.as_numpy()
         gs.ball.linear_velocity = ball_state.vel.as_numpy()
         gs.ball.angular_velocity = ball_state.ang_vel.as_numpy()
-        gs.ball.rotation_mtx = np.ascontiguousarray(ball_state.rot_mat.as_numpy().reshape(3, 3).transpose())
 
         # Only works for soccar
         gs.goal_scored = abs(gs.ball.position[1]) > BACK_WALL_Y + BALL_RADIUS
@@ -172,9 +177,11 @@ class RocketSimEngine(TransitionEngine[AgentID, GameState, np.ndarray]):
             car.autoflip_timer = car_state.auto_flip_timer
             car.autoflip_direction = car_state.auto_flip_torque_scale
 
-            car.bump_victim_id = self._rsim_id_to_agent_id(car_state.car_contact_id) if car_state.car_contact_cooldown_timer > 0 else None
+            car.bump_victim_id = car_state.car_contact_id if car_state.car_contact_cooldown_timer > 0 else None
             car.ball_touches = self._touches[rsim_car.id]
-            self._touches[rsim_car.id] = 0
+            car.shots = self._shots[rsim_car.id]
+            car.saves = self._saves[rsim_car.id]
+            self._touches[rsim_car.id] = self._shots[rsim_car.id] = self._saves[rsim_car.id] = 0
 
             gs.cars[agent_id] = car
 
@@ -225,6 +232,12 @@ class RocketSimEngine(TransitionEngine[AgentID, GameState, np.ndarray]):
     def _ball_touch_callback(self, arena: rsim.Arena, car: rsim.Car, data):
         self._touches[car.id] += 1
 
+    def _shot_callback(self, arena: rsim.Arena, shooter: rsim.Car, passer: rsim.Car, data):
+        self._shots[shooter.id] += 1
+
+    def _save_callback(self, arena: rsim.Arena, car: rsim.Car, data):
+        self._saves[car.id] += 1
+
     def create_base_state(self) -> GameState:
         gs = GameState()
         gs.tick_count = 0
@@ -240,13 +253,6 @@ class RocketSimEngine(TransitionEngine[AgentID, GameState, np.ndarray]):
         gs.boost_pad_timers = np.zeros(len(BOOST_LOCATIONS), dtype=np.float32)
 
         return gs
-
-    def _rsim_id_to_agent_id(self, rsim_id: str) -> Optional[str]:
-        for agent_id, rsim_car in self._cars.items():
-            if rsim_car.id == rsim_id:
-                return agent_id
-        
-        return None
 
     def close(self) -> None:
         pass
