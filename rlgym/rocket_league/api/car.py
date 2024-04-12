@@ -27,6 +27,8 @@ class Car(Generic[AgentID]):
     boost_amount: float
     boost_active_time: float  # you're forced to boost for at least 12 ticks
     handbrake: float
+    shots: int
+    saves: int
 
     # Jump Stuff
     has_jumped: bool
