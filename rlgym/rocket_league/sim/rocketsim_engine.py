@@ -25,8 +25,8 @@ class RocketSimEngine(TransitionEngine[AgentID, GameState, np.ndarray]):
         self._cars: Dict[AgentID, rsim.Car] = {}
         self._hitboxes: Dict[int, int] = {}
         self._touches: Dict[int, int] = {}
-        self._saves = Dict[int, int] = {}
-        self._shots = Dict[int, int] = {}
+        self._saves: Dict[int, int] = {}
+        self._shots: Dict[int, int] = {}
         self._arena = rsim.Arena(rsim.GameMode.SOCCAR)
 
         self._init_callbacks()
